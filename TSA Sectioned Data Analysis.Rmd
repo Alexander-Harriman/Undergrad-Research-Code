@@ -1,0 +1,430 @@
+---
+title: "TSA Data 2.0"
+author: "Emily Graham, Alexander Harriman, Sylvia Wu"
+date: '`r format(Sys.time(), "%B %d, %Y")`'
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    fig_width: 8.5
+    fig_height: 6
+    fig_caption: yes
+header-includes:
+   - \usepackage{animate}
+---
+
+
+## Load the TSA dataset
+
+```{r}
+# Note: you should place the data in the same folder as the R code
+tsa_claims = read.csv("Baggage.csv", strip.white = TRUE)
+head(tsa_claims)
+summary(tsa_claims$Close.Amount)
+```
+
+## Extract the time series for close amounts
+
+```{r, message=FALSE}
+close_amt = tsa_claims[,"Close.Amount"]
+#close_amt = gsub("\\$", "", close_amt)
+#close_amt = gsub(";", "", close_amt)
+#close_amt = close_amt[!is.na(close_amt)]
+close_amt = as.numeric(close_amt)
+
+plot(sqrt(close_amt)~as.Date(tsa_claims$Date.Received,"%m/%d/%y"),
+     xlab = "Date Received", ylab = "Close Amount (thousands of dollars)",
+     main = "Close Amounts", type = "h",
+     pch = 19, cex = 0.5, col = "lightsalmon",
+     ylim = range(sqrt(close_amt), na.rm = T), las = 1,
+     yaxt = "n")
+axis(2, at = seq(0, 500, 100), labels = (seq(0, 50, 10))^2/10, las = 1)
+```
+
+## Extract annual maximum 
+
+```{r}
+monthChars <- c("Jan-", "Feb-", "Mar-", "Apr-", "May-", "Jun-", "Jul-", "Aug-", "Sep-", "Oct-", "Nov-", "Dec-")
+yearChars <- paste0("0", seq(2, 9))
+yearChars <- c(yearChars, paste0(seq(10, 15)))
+
+byQuarter <- vector(mode = "list", length = 4*14-2)
+byQuarter[[1]] <- close_amt[grepl(paste0(monthChars[6], yearChars[1]), tsa_claims$Date.Received.2)]
+
+for (quart in seq(3,4)) {
+  for (month in seq(1,3)) {
+    byQuarter[[quart-2]] <- c(byQuarter[[quart-2]], close_amt[grepl(paste0(monthChars[(quart-1)*3+month], yearChars[1]), tsa_claims$Date.Received.2)])
+  } 
+} 
+
+for (year in seq(2,length(yearChars))) {
+  for (quart in seq(1,4)) {
+    for (month in seq(1, 3)) {
+      byQuarter[[(year-2)*4 + quart + 2]] <- 
+        c(byQuarter[[(year-2)*4 + quart + 2]],
+          close_amt[grepl(paste0(monthChars[(quart-1)*3+month], 
+                                 yearChars[year]), tsa_claims$Date.Received.2,
+                          fixed=TRUE)])
+    }
+  }
+}
+
+length(unlist(byQuarter))
+
+
+# Extract annual maxima
+quartMax <- sapply(byQuarter, FUN=max)
+quartMax
+# Extract the timing of annual maxima
+quartMaxT <- sapply(byQuarter, which.max)
+quartMaxT
+# Plot the daily time series
+plot(sqrt(unlist(byQuarter))~as.Date(tsa_claims$Date.Received.2,"%d-%b-%y"),
+     xlab = "Year", ylab = "Close Amt ($ sqrt)",
+     main = "Close Amounts (sqrt $)", type = "h",
+     pch = 19, cex = 0.5, col = "lightsalmon",
+     ylim = range(sqrt(close_amt), na.rm = T), las = 1)
+grid()
+```
+
+## Block-Maxima Method 
+
+We are going to conduct an extreme value analysis using the `extRemes` package developed and maintained by `Eric Gilleland`.
+
+### Step I: Determine the block size and compute maxima for blocks
+
+```{r, message=FALSE}
+# Setting up the figure configuration
+old.par <- par(no.readonly = TRUE)
+mar.default <- par("mar")
+mar.left <- mar.default
+mar.right <- mar.default
+mar.left[2] <- 0
+mar.right[4] <- 0
+
+# Time series plot
+par(fig = c(0.2, 1, 0, 1), mar = mar.left)
+#yr = rep(0,length(unlist(byQuarter)))
+#yr[endOfQuarts[1]] = 1
+#for (i in seq(2,length(yr))) {
+ # yr[endOfQuarts[i]] = yr[endOfQuarts[i-1]]+1
+#}
+#unlist(byQuarter)~as.Date(tsa_claims$Date.Received.2,"%d-%b-%y")
+#seq(1:length(unlist(byQuarter))), unlist(byQuarter)
+plot(seq(1:length(unlist(byQuarter))), unlist(byQuarter),
+      xlab = "Quarters", ylab = "", xaxt = 'n',
+      main = "Quarters (from third 2002 - fourth 2015)",
+      type = "h", pch = 19, cex = 0.5, col = "lightsalmon",
+      ylim = c(0, 1.2 * max(unlist(byQuarter), na.rm = T)), yaxt = "n")
+par(las = 0)
+axis(4, seq(0,250000,50000))
+par(las = 0)
+mtext("Dollars ($)", side = 2, line = 5)
+begOfQuarts <- rep(1,length(byQuarter))
+for (i in seq(1,length(byQuarter)-1))
+  begOfQuarts[i+1] <- begOfQuarts[i] + length(byQuarter[[i]])
+endOfQuarts <- rep(length(byQuarter[[1]]),length(byQuarter))
+for (i in seq(2,length(byQuarter)))
+  endOfQuarts[i] <- endOfQuarts[i-1] + length(byQuarter[[i]])
+abline(v = endOfQuarts, col = "gray", lty = 2)
+#points(begOfQuarts + quartMaxT, quartMax,
+       #pch = 16, col = "lightsalmon4", cex = 0.5)
+
+# Histogram
+
+##trouble trouble i didnt make this shit work
+hs <- hist(quartMax,
+           breaks = seq(0, 1.2 * max(unlist(byQuarter), na.rm = T), length.out = 35),
+           plot = FALSE)
+
+par(fig = c(0, 0.2, 0, 1.0), mar = mar.right, new = T)
+
+plot (NA, type = 'n', axes = FALSE, yaxt = 'n',
+      col = rgb(0, 0, 0.5, alpha = 0.5),
+      xlab = "Density", ylab = NA, main = NA,
+      xlim = c(-0.01, 0),
+      ylim = c(0, 1.2 * max(unlist(byQuarter), na.rm = T)))
+axis(1, at = c(-0.01, -0.005, 0), c(0.01, 0.005, 0), las = 2)
+arrows(rep(0, length(hs$breaks[-35])), hs$breaks[-35],
+       -hs$density, hs$breaks[-35], col = "lightsalmon4",
+       length = 0, angle = 0, lwd = 1)
+arrows(rep(0, length(hs$breaks[-1])), hs$breaks[-1],
+       -hs$density, hs$breaks[-1], col = "lightsalmon4",
+       length = 0, angle = 0, lwd = 1)
+arrows(-hs$density, hs$breaks[-35], -hs$density,
+       hs$breaks[-1], col = "lightsalmon4", angle = 0,
+       length = 0)
+library(extRemes)
+#gives the point estimate
+mle <- fevd(quartMax)$results$par
+xg <- seq(0, 1.2 * max(unlist(byQuarter), na.rm = T), length.out = 100)
+library(ismev)
+lines(-gev.dens(mle, xg), xg, col = "darksalmon") 
+par(old.par)
+```
+
+### Step II: Fit a GEV to the maxima and assess the fit
+
+We assume the annual maxima $m_{1}, \cdots, m_{t}$ follows a GEV distribution $GEV(\mu_{n}, \sigma_{n}, \xi)$ and we maximize the log-likelihood  
+$-\sum_{i=1}^{t}(1+\xi(\frac{m_{t}-\mu}{\sigma}))^{-\frac{1}{\xi}}- t log(\sigma) - (\frac{1}{\xi}+1)\sum_{i=1}^{t}log(1+\xi(\frac{m_{t}-\mu}{\sigma}))$ to obtain the maximum likelihood estimates $\hat{\mu}$, $\sigma$, and $\hat{\xi}$. 
+
+## GEV model fit
+
+```{r, message=FALSE, fig.height=6, fig.width=6}
+# Fit a GEV to annual maximum daily precip using MLE
+library(scales)
+gevfit <- fevd(quartMax, time.units = "4/year", period.basis = "4/year")
+# Print the results 
+gevfit
+```
+
+## Model checking
+
+```{r}
+# The defult diagnostic plots in the extRemes package
+plot(gevfit)
+#Create a QQ plot yourself
+N = length(quartMax)
+p <- (1:N) / (N + 1)
+qm <- gevq(mle, 1 - p)
+plot(qm, sort(quartMax), xlim = range(quartMax), ylim = range(quartMax), pch = 16, cex = 1, col = alpha("blue", 0.5), xlab = "Model", ylab = "Empirical",
+     main ="Quantile Plot", las = 1)
+abline(0, 1, lwd = 1.5)
+```
+
+
+### Step III: Perform inference for return levels
+
+Suppose we are interested in estimating 50-year return level. We plug in the maximum likelihood estimates $(\hat{\mu}, \hat{\sigma}, \hat{\xi})$ we just obtained into the GEV quantile equation:
+$$\hat{\mathrm{RL}}_{p} = \hat{\mu}-\frac{\hat{\sigma}}{\xi}[1 - (-log(1-p))^{-\hat{\xi}}],$$
+where the "log" denotes the natural logarithm. The so-called r-year return level can be obtained by letting $p = \frac{1}{r}$.  
+
+
+```{r}
+RL5 <- return.level(gevfit, return.period = 4) # Estimate of the 50-year event
+RL5
+## Checking this number with the formula above
+library(evd)
+#remember mle contains muhat, sigmahat, ksihat
+evd::qgev(1 - 1 / 4, mle[1], mle[2], mle[3])
+# Quantify the estimate uncertainty
+## Delta method
+CI_delta <- ci(gevfit, return.period =  4, verbose = T) 
+CI_delta
+## Profile likelihood method
+#xrange is the initial guess since calculation is so cumbersome
+CI_prof <- ci(gevfit, method = "proflik", xrange = c(10000, 20000),
+   return.period =  4, verbose = F)
+CI_prof 
+
+hist(quartMax, breaks = seq(0, 1.2 * max(unlist(byQuarter), na.rm = T), length.out = 35),
+     col = alpha("lightblue", 0.2), border = "gray",
+     xlim = c(0, 50000), prob = T, ylim = c(0, .0001),
+     xlab = " Claim Amount",
+     main = "95% CI for 5-yr RL",
+     las = 1)
+xg <- seq(0, 250000, len = 1000)
+mle <- gevfit$results$par
+lines(xg, gev.dens(mle, xg), lwd = 1.5)
+for (i in c(1, 3)) abline(v = CI_delta[i], lty = 2, col = "blue")
+for (i in c(1, 3)) abline(v = CI_prof[i], lty = 2, col = "red")
+abline(v = RL5, lwd = 1.5, lty = 2)
+legend("topright", legend = c("Delta CI", "Prof CI"), col = c("blue", "red"), lty = c(2, 3), bty = "n", cex = 1.25, lwd = 1.5)
+```
+
+
+## Peak-Over-Threshold Method
+
+### Step I: Pick a threshold and extract the threshold exceedances.
+
+How to pick an appropraite threshold here? We use a graphical tool to do this.
+
+```{r}
+library(ismev)
+#mean residual life plot
+mrl.plot(close_amt[!is.na(close_amt)], umax = 4000)
+# I choose 0.75 as the threshold but note that the "straightness"
+# is difficult to assess
+abline(v = 850, col = "blue", lty = 2)
+```
+
+Here we choose the threshold to be $3500, as this value appears to be a small number that the mean residual life curve becomes linear. 
+
+
+```{r}
+library(scales)
+library(extRemes)
+old.par <- par(no.readonly = TRUE)
+mar.default <- par('mar')
+mar.left <- mar.default
+mar.right <- mar.default
+mar.left[2] <- 0
+mar.right[4] <- 0
+# Time series plot
+par(fig = c(0.2, 1, 0, 1), mar = mar.left)
+plot(seq(1:length(close_amt)), close_amt,
+      xlab = "Claims", ylab = "Dollars",
+      main = "Close Amounts",
+      type = "h", pch = 19, cex = 0.5, xaxt = 'n', col = "lightsalmon",
+      ylim = c(0, 1.2 * max(close_amt, na.rm = T)), yaxt = "n")
+par(las = 0)
+axis(4, at = seq(0,250000,50000))
+par(las = 0)
+mtext("Dollars", side = 2, line = 4)
+#Threshold exceedances
+thres <- 850
+ex_id <- which(close_amt > thres)
+ex <- close_amt[ex_id]
+length(ex)
+#Extract the timing of POT
+abline(h = thres, col = "lightsalmon4", lty = 2)
+points(ex_id, ex, col = alpha("lightsalmon4", 0.5), pch = 16,
+       cex = 0.75)
+par(las = 2)
+#axis(4, at = 0:8)
+par(las = 0)
+#mtext("Precipitation (in)", side = 2, line = 5)
+grid()
+hs <- hist(ex, seq(thres, 1.1 * max(close_amt, na.rm = T), len = 50),
+           plot = FALSE)
+par(fig = c(0, 0.2, 0, 1.0), mar = mar.right, new = T)
+plot (NA, type = 'n', axes = FALSE, yaxt = 'n',
+      col = rgb(0,0,0.5, alpha = 0.5),
+      xlab = "", ylab = NA, main = NA, xlim = c(-max(hs$density), 0), 
+      ylim = c(.01, 1.2 * max(close_amt, na.rm = T)))
+
+axis(1, at = c(-0.014, -0.007, 0),
+     c(0.014, 0.007, 0), las = 2)
+#abline(h = 21, col = "darksalmon", lty = 5)
+arrows(rep(0, length(hs$breaks[-50])), hs$breaks[-50],
+       -hs$density, hs$breaks[-50], col = "lightsalmon4",
+       length = 0, angle = 0, lwd = 1)
+arrows(rep(0, length(hs$breaks[-1])), hs$breaks[-1],
+       -hs$density, hs$breaks[-1], col = "lightsalmon4",
+       length = 0, angle = 0, lwd = 1)
+arrows(-hs$density, hs$breaks[-50], -hs$density,
+       hs$breaks[-1], col = "lightsalmon4", angle = 0,
+       length = 0)
+
+mle <- fevd(c(close_amt[!is.na(close_amt)]), threshold = thres, type = "GP", time.units = "days", period.basis = "days")$results$par
+
+xg <- seq(thres, 1.1 * max(close_amt,na.rm = T), length.out = 100)
+lines(-gpd.dens(mle, thres, xg), xg, col = "darksalmon")
+par(old.par)
+```
+
+
+### Step II: Fit a GPD to threshold excesses and assess the fit
+
+```{r, fig.asp=1}
+# Fit a GPD for threshold exceenances using MLE
+gpdfit1 <- fevd(c(close_amt[!is.na(close_amt)]), threshold = thres, type = "GP", time.units = "days", period.basis = "days")
+# Print the results 
+gpdfit1
+#I just used the automatic plot fcn
+# QQ plot
+p <- 1:length(ex) / (length(ex) + 1)
+qm <- gpdq(mle, 850, 1 - p)
+plot(qm, sort(ex), xlim = c(thres, max(ex)), ylim = c(thres, max(ex)),
+     pch = 16, cex = 1, col = alpha("blue", 0.5),
+     xlab = "Model", ylab = "Empirical", main = "Quantile Plot",
+     las = 1)
+abline(0, 1, lwd = 1.5)
+```
+
+
+### Step III: Perform inference for return levels
+
+Again we are interested in estimating 50-year return level
+
+
+```{r}
+png(filename="BAGGAGE.png")
+mle <- gpdfit1$results$par
+mle
+
+#1 year return
+p = 1 - 14/68
+#2 year return
+#p = 1 - 7/181995
+
+RL1 <- evd::qgpd(p, thres, mle[1], mle[2])
+RL1
+length(close_amt[which(close_amt > RL1)])
+
+return.level(gpdfit1, return.period = 31) # this number should be the same as RL1
+
+
+CI_delta <- ci(gpdfit1, return.period = 31, verbose = F) 
+CI_delta
+CI_prof <- ci(gpdfit1, method = "proflik", , xrange = c(0, 25000), return.period = 31, verbose = F)
+CI_prof
+
+
+hist(ex, 40, col = alpha("lightblue", 0.2), border = "gray",
+     xlim = c(0,12500), prob = T, ylim = c(0, .001),
+     xlab = "Threshold excess ($)",
+     main = "95% CI for 1-month RL")
+
+xg <- seq(thres, 10, len = 1000)
+
+lines(xg, gpd.dens(mle, thres, xg), lwd = 1.5)
+for (i in c(1, 3)) abline(v = CI_delta[i], lty = 2, col = "blue")
+for (i in c(1,3)) abline(v = CI_prof[i], lty = 2, col = "red")
+abline(v = 4992.918, lwd = 1.5, lty = 2)
+legend("topleft", legend = c("Delta CI", "Prof CI"),
+       col = c("blue", "red"), lty = c(2, 3), bty = "n", cex = 1.25,
+       lwd = 1.5)
+dev.off()
+```
+
+summary()
+
+## Nonstationary GEV fitting
+
+We we investigate if the distribution of annual maximum daily rainfall in Clemson depdends on other factors.  
+
+```{r, eval=FALSE}
+load("SC_-82.5_35_NCEP.RData")
+annmeanT <- unlist(lapply(SC_t, mean))
+plot(1950:2014, annmeanT, type = "l",
+     xlab = "Year", ylab = "Annual mean temperature")
+
+plot(annmeanT, annmx, pch = 16, col = "blue",
+     xlab = "Annual mean temperature",
+     ylab = "Annual maximum rainfall")
+
+gevfit1 <- fevd(annmx, location.fun = ~ annmeanT, scale.fun = ~ annmeanT, use.phi = T)
+gevfit1
+lr.test(gevfit1, gevfit)
+
+library(rsoi)
+enso <- download_enso()
+order <- order(enso$Date)
+ENSO <- enso[order,]
+## 1952 -2019
+soi_temp <- ENSO$SOI[12:827]
+SOI_mon <- array(soi_temp, dim = c(12, 68))
+SOI_yr <- apply(SOI_mon, 2, mean)
+
+plot(SOI_yr[1:63], annmx[1:63], pch = 16, col = "blue", xlab = "SOI",
+     ylab = "Annual maximum rainfall")
+
+gevfit2 <- fevd(annmx[1:63], location.fun = ~ SOI_yr[1:63], scale.fun = ~ SOI_yr[1:63], use.phi = T)
+gevfit2
+lr.test(gevfit2, gevfit)
+```
+
+
+
+
+
+plot(cars)
+```
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Cmd+Option+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Cmd+Shift+K* to preview the HTML file). 
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
+
