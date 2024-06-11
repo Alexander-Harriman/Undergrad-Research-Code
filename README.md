@@ -7,5 +7,6 @@ This folder consists of code used during my two undergraduate research programs:
 - The result was a poster presented to a panel of Clemson professors through Zoom and an individual poster created and shared at the end of the project.
 
 General information on the EUREKA Research Program can be found here: [https://www.clemson.edu/cuhonors/opportunities/intellectual-growth/eureka/index.html]
+
 Information on the COURAGE project can be found here: [https://ssather.people.clemson.edu/COURAGE/ADAP/]
 
