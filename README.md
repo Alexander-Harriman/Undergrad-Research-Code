@@ -10,3 +10,5 @@ General information on the EUREKA Research Program can be found here: [https://w
 
 Information on the COURAGE project can be found here: [https://ssather.people.clemson.edu/COURAGE/ADAP/]
 
+
+The folder also contains some code from classes pertaining to advanced modeling techniques, such as Time Series Analysis.
