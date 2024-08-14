@@ -1,0 +1,270 @@
+---
+title: 'Cellar Dweller: Modeling Wine Sales and Predicting Future Outlook'
+author: "Alexander Harriman"
+date: "11/24/2021"
+output:
+  word_document:
+    toc: yes
+  html_document:
+    code_download: yes
+    number_sections: yes
+    theme: darkly
+    toc: yes
+    toc_float: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Loading Data and Packages
+```{r}
+suppressPackageStartupMessages(library(randtests))
+suppressPackageStartupMessages(library(forecast))
+
+wine <- read.table("wine1.txt", header = FALSE)
+
+time <- 1:length(wine$V1)
+
+png("wine_data.png")
+plot(time, wine$V1, type = "o", ylab = "Wine Sales", xlab = "Month")
+dev.off()
+```
+
+# Trends
+
+The first step is to remove any trends from the data. Since the variability increases as time increases, a logarithmic model will be used for the trend.
+
+```{r}
+logModel <- lm(V1 ~ log(time), data = wine)
+summary(logModel)
+
+#The log(time) variable is statistically significant and will remain in the final model.
+
+#Checking residuals:
+logResid <- resid(logModel)
+plot(time, logResid, type = "o")
+```
+
+The second step is to remove seasonal components from the data. Since the residuals for the logarithmic model appear to have a seasonal trend with period d = 12 (which fits the original data's seasonal trend), both it and d = 6 will be tested.
+
+```{r}
+logTime <- lm(V1 ~ log(time) + cos(2*pi*time/12) + sin(2*pi*time/12) + cos(2*pi*time/6) + sin(2*pi*time/6), data = wine)
+
+summary(logTime)
+
+#Since both terms with d = 6 are not statistically significant, the model will be run again without them
+
+logTime2 <- lm(V1 ~ log(time) + cos(2*pi*time/12) + sin(2*pi*time/12), data = wine)
+summary(logTime2)
+
+#The terms with period d = 12 remain in the model.
+
+##Residuals:
+timeResid <- resid(logTime2)
+
+png("reg_resid.png")
+plot(time, timeResid, type = "o")
+dev.off()
+```
+
+# Diagnostics
+
+Now that the trend and seasonal components are removed, the first round of diagnostics will determine if the residuals are IID using the residual tests.
+
+```{r}
+#ACF and PACF Visualization Test
+png("reg_acf.png")
+acf(timeResid, lag.max = 50)
+dev.off()
+png("reg_pacf.png")
+pacf(timeResid, lag.max = 50)
+dev.off()
+
+#Neither of these models have lag values within the boundaries, so both tests fail.
+
+#Tests
+Box.test(timeResid, type = "Ljung-Box")
+turning.point.test(timeResid)
+rank.test(timeResid)
+difference.sign.test(timeResid)
+
+#The Box Test and the Rank Test have p-values that reject the null, and the Turning Point Test and Difference Sign Test have p-values that accept the null.
+
+#Since most of the tests reject the null, the residuals are not IID.
+```
+
+# ARMA Modeling
+
+The next step is to find the best ARMA model. 
+
+Based on the ACF, an MA model is not proper since values of the ACF are continuously outside of the bounds.
+
+Based on the PACF, an AR model is a better model, but is not strong. We can use the ar() function to determine the best model:
+
+```{r}
+#Yule-Walker
+yuleMod <- ar(timeResid, method = "yule-walker")
+yuleMod
+
+#MLE
+mleMod <- ar(timeResid, method = "mle")
+mleMod
+
+#The MLE has an AR(12) model and the Yule-Walker has an AR(13) model.
+
+#The best ARMA model:
+arimaMod <- auto.arima(timeResid)
+arimaMod
+
+#The best ARMA model is ARIMA(0,1,1) using auto.arima. This simplifies to an MA(1) model with the I term removed.
+```
+
+# Residual Diagnostics
+
+All of the candidate functions will now go through the second round of residual diagnostics.
+
+## AR(13) for Yule-Walker
+```{r}
+yuleResid <- resid(yuleMod)
+
+png("yule_resid.png")
+plot(yuleResid, type = "o")
+dev.off()
+
+#The first 13 values need to be removed since this is an AR(13) model
+yuleResid <- yuleResid[14:length(yuleResid)]
+
+#Tests
+png("yule_acf.png")
+acf(yuleResid, lag.max = 50)
+dev.off()
+png("yule_pacf.png")
+pacf(yuleResid, lag.max = 50)
+dev.off()
+
+Box.test(yuleResid, type = "Ljung-Box")
+turning.point.test(yuleResid)
+rank.test(yuleResid)
+difference.sign.test(yuleResid)
+
+#Both the ACF and PACF have only a few lag values that barely cross over the boundary lines. So, these tests are inconclusive.
+
+##However, since each test but the Rank Test accepts the null, we can conclude that the residuals for the Yule-Walker estimation are IID. 
+```
+
+## AR(12) for MLE
+```{r}
+mleResid <- resid(mleMod)
+
+png("mle_resid.png")
+plot(mleResid, type = "o")
+dev.off()
+
+#The first 12 values need to be removed since this is an AR(12) model
+mleResid <- mleResid[13:length(mleResid)]
+
+#Tests
+png("mle_acf.png")
+acf(mleResid, lag.max = 50)
+dev.off()
+png("mle_pacf.png")
+pacf(mleResid, lag.max = 50)
+dev.off()
+
+Box.test(mleResid, type = "Ljung-Box")
+turning.point.test(mleResid)
+rank.test(mleResid)
+difference.sign.test(mleResid)
+
+#Just like the Yule-Walker estimation, the ACF and PACF tests are inconclusive, but every test but the Rank Test accepts the null. So, the MLE estimation has residuals that are IID.
+```
+
+## ARIMA(0,1,1) for auto.arima()
+```{r}
+autoResid <- resid(arimaMod)
+
+#Tests
+acf(autoResid, lag.max = 50)
+pacf(autoResid, lag.max = 50)
+
+Box.test(autoResid, type = "Ljung-Box")
+turning.point.test(autoResid)
+rank.test(autoResid)
+difference.sign.test(autoResid)
+
+#For this model, the ACF test fails due to many of the ACF values falling outside of the bounds. The PACF is inconclusive, but to a lesser extent than both AR-only models.
+
+##All tests except for the Rank test accept the null hypothesis. So, it is unclear whether the residuals for this ARIMA(0,1,1) model are IID or not.
+```
+
+# The Best Model
+Since fewer tests support the ARIMA(0,1,1) model's residuals being IID, it drops out of the analysis. So, that leaves the two AR(p) models estimated by Yule-Walker and MLE.
+
+In order to determine the best model, the AICC values for both models will be investigated. Although the MLE model has a smaller p value, the AICC may find the AR(13) better.
+
+```{r}
+#Verifying the Model using Arima()
+
+yuleMA <- Arima(timeResid, order = c(13,0,0)) #Yule-Walker
+yuleMA
+
+mleMA <- Arima(timeResid, order = c(12,0,0)) #MLE
+mleMA
+```
+
+# Conclusion
+The AICC value for the AR(13) model is less than the AICC value for the AR(12) model. However, since the two are relatively similar, both models could be chosen. 
+
+Overall, since 12 < 13, the best choice to model the wine data is **an AR(12) time series with a seasonal time series of period d = 12 and a logarithmic trend.**
+
+The model is estimated to be **X_t = 337.2log(t) - 250.39cos(2pi(t)/12) - 273.82sin(2pi(t))/12) + E_t**, 
+where E_t is an AR(12) model of the form **E_t = 0.1924E_(t-1) + 0.1067E_(t-2) + 0.1674E_(t-3) + 0.0739E_(t-4) + 0.0849E_(t-5) - 0.1072E_(t-6) + 0.1128E_(t-7) + 0.0616E_(t-8) - 0.0034E_(t-9) - 0.1268E_(t-10) - 0.141E_(t-11) + 0.5053E_(t-12) + Z_t**, 
+where **Z_t ~ IID(0, 45876)**, 
+based on an MLE estimation.
+
+
+# Predicting the Next 5 Values
+Using the model, we can predict future values. 
+
+```{r}
+#Vector Initialization
+seasonal <- matrix(data = rep(0,5), nrow = 5, ncol = 1)
+log <- matrix(data = rep(0,5), nrow = 5, ncol = 1)
+
+#Predicting the AR(12) portion
+arPred <- predict(mleMod, n.ahead = 5)
+arPred #Error values
+
+#Predicting the Seasonal Trend:
+for(i in 143:147){
+  seasonal[i-142] <- (-250.39*(cos(2*pi*i/12)) - 273.82*sin(2*pi*i/12))
+}
+
+#Predicting the Logarithmic Trend:
+for(i in 143:147){
+  log[i-142] <- (337.2*log(i))
+}
+
+#Combining the three predictions to get final values:
+for(i in 1:5){
+  print(arPred$pred[i] + seasonal[i] + log[i]) #X_t values
+}
+
+```
+
+So, the next five values for wine sales are 1968.216, 2123.137, 1242.278, 1664.179, and 1761.134. These values make sense based on the original data; they fit into the general values around the end of the original data.
+
+# Plotting the Extra Data Values
+```{r}
+#Adding the Estimated Values to Original Data
+predictedValues <- c(1968.216, 2123.137, 1242.278, 1664.179, 1761.134)
+allValues <- c(wine$V1, predictedValues)
+
+allTimes <- 1:147
+
+#Total Plot
+png("all_data.png")
+plot(allTimes, allValues, type = "o", xlab = "Time", ylab = "Wine Sales")
+dev.off()
+```
